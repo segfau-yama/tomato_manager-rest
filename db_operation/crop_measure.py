@@ -20,39 +20,41 @@ harvest = LEDBoard(17, 27)
 
 # 収穫判定パターン配列
 judge = [
-    (0, 1), #可能
-    (1, 0), #不可
-    (1, 1), #判定前
-    (0, 0), #判定中
+    (0, 1),  # 可能
+    (1, 0),  # 不可
+    (1, 1),  # 判定前
+    (0, 0),  # 判定中
 ]
 
 # 7セグパターン配列
 pattern = [
-   # a, b, c, d, e, f, g, dp 
-    (1, 1, 1, 1, 1, 1, 0, 0), #0
-    (0, 1, 1, 0, 0, 0, 0, 0), #1
-    (1, 1, 0, 1, 1, 0, 1, 0), #2
-    (1, 1, 1, 1, 0, 0, 1, 0), #3
-    (0, 1, 1, 0, 0, 1, 1, 0), #4
-    (1, 0, 1, 1, 0, 1, 1, 0), #5
-    (1, 0, 1, 1, 1, 1, 1, 0), #6
-    (1, 1, 1, 0, 0, 1, 0, 0), #7
-    (1, 1, 1, 1, 1, 1, 1, 0), #8
-    (1, 1, 1, 1, 0, 1, 1, 0), #9
-    (1, 0, 0, 1, 1, 1, 1, 0), #END
+    # a, b, c, d, e, f, g, dp
+    (1, 1, 1, 1, 1, 1, 0, 0),  # 0
+    (0, 1, 1, 0, 0, 0, 0, 0),  # 1
+    (1, 1, 0, 1, 1, 0, 1, 0),  # 2
+    (1, 1, 1, 1, 0, 0, 1, 0),  # 3
+    (0, 1, 1, 0, 0, 1, 1, 0),  # 4
+    (1, 0, 1, 1, 0, 1, 1, 0),  # 5
+    (1, 0, 1, 1, 1, 1, 1, 0),  # 6
+    (1, 1, 1, 0, 0, 1, 0, 0),  # 7
+    (1, 1, 1, 1, 1, 1, 1, 0),  # 8
+    (1, 1, 1, 1, 0, 1, 1, 0),  # 9
+    (1, 0, 0, 1, 1, 1, 1, 0),  # END
 ]
 maturity_led.value = pattern[1]
 
-def crop_sensor_attach(sensor_count = 4, gain = 4, integration_time = 150):
+
+def crop_sensor_attach(sensor_count=4, gain=4, integration_time=150):
     i2c = board.I2C()
     mux = adafruit_tca9548a.TCA9548A(i2c)
     sensor = []
-    
+
     for i in range(3, 3 + sensor_count):
         sensor.append(adafruit_tcs34725.TCS34725(mux[i]))
         sensor[i - 3].gain = gain
         sensor[i - 3].integration_time = integration_time
     return sensor
+
 
 def crop_database_conn():
     connection_config = {
@@ -62,14 +64,16 @@ def crop_database_conn():
         'user': 'postgres',
         'password': 'lYRIXz15NSpu371JXmo4',
     }
-    engine = create_engine('postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
+    engine = create_engine(
+        'postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
     df = pd.read_sql("SELECT maturity FROM level_setting_level \
                     ORDER BY date_time DESC \
                     LIMIT 1", con=engine)
     df.to_csv('/home/yamamoto/start/maturity.csv', index=False)
-    
+
     df = pd.read_sql("SELECT * FROM datas_tomato", con=engine)
     return df
+
 
 def crop_format_change(df):
     sample_df = []
@@ -86,10 +90,11 @@ def crop_format_change(df):
     samples = np.array(samples)
     return samples
 
+
 def crop_measurment(sensor, samples):
     sensor_count = len(sensor)
     measurements = []
-    
+
     # 測定(センサ4個*5回)
     for i in range(sensor_count):
         for j in range(5):
@@ -98,10 +103,9 @@ def crop_measurment(sensor, samples):
         measurements = sorted(measurements)
     measurements = np.array(measurements, dtype="int").T.flatten()
     return measurements
-    
 
 
-def crop_judgement_corrcoef(measurements ,forecast):
+def crop_judgement_corrcoef(measurements, forecast):
     # 相関係数での判定
     correlations = []
     for crop_id in range(5):
@@ -113,7 +117,8 @@ def crop_judgement_corrcoef(measurements ,forecast):
     result = int(correlations.argmax() + 1) == int(forecast)
     return result
 
-def crop_judgement_rgb(measurements ,forecast):
+
+def crop_judgement_rgb(measurements, forecast):
     # RGB分布での判定
     rgb_distributions = []
     for crop_id in range(5):
@@ -121,9 +126,11 @@ def crop_judgement_rgb(measurements ,forecast):
         if crop_id == 0:
             rgb_distributions = np.mean(rgb_distribution[0][1:])
         else:
-            rgb_distributions = np.append(rgb_distributions, np.mean(rgb_distribution[0][1:]))
+            rgb_distributions = np.append(
+                rgb_distributions, np.mean(rgb_distribution[0][1:]))
     result = int(rgb_distributions.argmax() + 1) == int(forecast)
     return result
+
 
 # メイン処理
 while True:
@@ -152,28 +159,29 @@ while True:
             'user': 'postgres',
             'password': 'lYRIXz15NSpu371JXmo4',
         }
-        engine = create_engine('postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
+        engine = create_engine(
+            'postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
         df = pd.read_sql("SELECT * FROM datas_tomato", con=engine)
-        
+
         # データフレームを変換
         samples = crop_format_change(df)
-        
+
         # カラーデータ取得，測定結果取得
         measurements = crop_measurment(sensor, samples)
         result_corrcoef = crop_judgement_corrcoef(measurements, maturity)
         result_rgb = crop_judgement_rgb(measurements, maturity)
-        
+
         harvest.value = judge[result]
         time.sleep(3)
         harvest.value = judge[3]
-        
+
         # 判定結果データフレーム配列作成
         judgements.append([maturity, result_corrcoef])
-        
+
         judgement_df = pd.DataFrame(judgements)
         judgement_df.columns = ["forecast_id", "result"]
-        
-        print(judgement_df)
-        judgement_df.to_sql('datas_judgement', con=engine, index=False, if_exists='append')
-        print(result)
 
+        print(judgement_df)
+        judgement_df.to_sql('datas_judgement', con=engine,
+                            index=False, if_exists='append')
+        print(result)
