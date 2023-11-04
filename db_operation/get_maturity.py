@@ -16,6 +16,10 @@ def main():
 
     df = pd.read_sql("SELECT * FROM datas_judgement", con=engine)
     print(df)
+    df = pd.read_csv("crops.csv")
+    df.to_sql('datas_crop', con=engine, index=False, if_exists='append')
+    df = pd.read_csv("color_data.csv")
+    df.to_sql('datas_tomato', con=engine, index=False, if_exists='append')
     """
     df.to_sql('datas_tomato', con=engine, index=False, if_exists='append')
     df = pd.read_csv("color_data.csv")
