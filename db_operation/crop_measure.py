@@ -56,22 +56,14 @@ def crop_sensor_attach(sensor_count=4, gain=4, integration_time=150):
     return sensor
 
 
-def crop_database_conn():
-    connection_config = {
-        'host': 'containers-us-west-119.railway.app',
-        'port': 6442,
-        'database': 'research',
-        'user': 'postgres',
-        'password': 'lYRIXz15NSpu371JXmo4',
-    }
-    engine = create_engine(
-        'postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
+def crop_database_conn(engine):
     df = pd.read_sql("SELECT maturity FROM level_setting_level \
                     ORDER BY date_time DESC \
                     LIMIT 1", con=engine)
     df.to_csv('/home/yamamoto/start/maturity.csv', index=False)
 
-    df = pd.read_sql("SELECT * FROM datas_tomato", con=engine)
+    df = pd.read_sql(
+        "SELECT id, red, green, blue, crop_id FROM datas_tomato", con=engine)
     return df
 
 
@@ -79,19 +71,20 @@ def crop_format_change(df):
     sample_df = []
     samples = [[], [], [], [], []]
     for crop_id in range(5):
+        # 作物idごとに配列を分割．データから作物idを除外
         sample_df.append(df[df['crop_id'] == crop_id + 1]
                          .filter(items=["red", "green", "blue"]))
-
     # データフレームを統合し、転置を取る
     for crop_id in range(5):
         for i in range(0, 81, 20):
             sample = np.array(sample_df[crop_id][i:i+20])
             samples[crop_id].append(sample.T.flatten())
     samples = np.array(samples)
+    print(sample_df)
     return samples
 
 
-def crop_measurment(sensor, samples):
+def crop_measurment(sensor):
     sensor_count = len(sensor)
     measurements = []
 
@@ -105,9 +98,9 @@ def crop_measurment(sensor, samples):
     return measurements
 
 
-def crop_judgement_corrcoef(measurements, forecast):
-    # 相関係数での判定
+def crop_judgement_corrcoef(measurements, samples, forecast):
     correlations = []
+    # 5回相関係数を導出(基準データ20*5)
     for crop_id in range(5):
         correlation = np.corrcoef(measurements, samples[crop_id])
         if crop_id == 0:
@@ -118,7 +111,7 @@ def crop_judgement_corrcoef(measurements, forecast):
     return result
 
 
-def crop_judgement_rgb(measurements, forecast):
+def crop_judgement_rgb(measurements, samples, forecast):
     # RGB分布での判定
     rgb_distributions = []
     for crop_id in range(5):
@@ -134,44 +127,48 @@ def crop_judgement_rgb(measurements, forecast):
 
 # メイン処理
 while True:
+    connection_config = {
+        'host': 'containers-us-west-119.railway.app',
+        'port': 6442,
+        'database': 'research',
+        'user': 'postgres',
+        'password': 'lYRIXz15NSpu371JXmo4',
+    }
+    engine = create_engine(
+        'postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
+
     judgements = []
     maturity = abs(counter.steps) + 1
     maturity_led.value = pattern[maturity]
     harvest.value = judge[2]
     # ボタンを押すと測定開始
     if switch.is_pressed:
+        if switch.is_held == 3:
+            maturity = pd.read_csv("reference_data.csv")
         # 7セグの表示がEなら測定終了
         if maturity == 10:
-            exit()
+            exit(1)
         print(f'forecast is {maturity}')
         for i in range(5):
-            blink = 0 if i % 2 else 1
+            blink = 2 if i % 2 else 3
             harvest.value = judge[blink]
             time.sleep(0.4)
         harvest.value = judge[3]
         # TCA9458での4個のI2Cセンサ割り当て
         sensor = crop_sensor_attach()
         # データベース処理
-        connection_config = {
-            'host': 'containers-us-west-119.railway.app',
-            'port': 6442,
-            'database': 'research',
-            'user': 'postgres',
-            'password': 'lYRIXz15NSpu371JXmo4',
-        }
-        engine = create_engine(
-            'postgresql://{user}:{password}@{host}:{port}/{database}'.format(**connection_config))
-        df = pd.read_sql("SELECT * FROM datas_tomato", con=engine)
-
+        df = crop_database_conn(engine)
         # データフレームを変換
         samples = crop_format_change(df)
 
         # カラーデータ取得，測定結果取得
-        measurements = crop_measurment(sensor, samples)
-        result_corrcoef = crop_judgement_corrcoef(measurements, maturity)
-        result_rgb = crop_judgement_rgb(measurements, maturity)
+        measurements = crop_measurment(sensor)
+        result_corrcoef = crop_judgement_corrcoef(
+            measurements, samples, maturity)
+        result_rgb = crop_judgement_rgb(measurements, samples, maturity)
 
-        harvest.value = judge[result]
+        harvest.value = judge[result_corrcoef]
+        print(result_corrcoef)
         time.sleep(3)
         harvest.value = judge[3]
 
@@ -180,8 +177,5 @@ while True:
 
         judgement_df = pd.DataFrame(judgements)
         judgement_df.columns = ["forecast_id", "result"]
-
-        print(judgement_df)
         judgement_df.to_sql('datas_judgement', con=engine,
                             index=False, if_exists='append')
-        print(result)
